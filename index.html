@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" name="viewport" content="width=device-width,initial-scale=1"/>
+    <link rel="stylesheet" href="/static/bootstrap.min.css">
+    <link rel="stylesheet" href="/static/bootstrap-icons.min.css">
+    <script src="/static/marked.min.js"></script>
+    <script src="/static/sse.js"></script>
+    <title>DuckDuckGo AI Page</title>
+    <style>
+        body {
+            background: #f5f5f5
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="row mt-5 mb-3">
+        <div class="col-md-2 offset-md-2">
+            <select class="form-select" id="model">
+                <option value="gpt-4o-mini" selected>GPT-4o mini</option>
+                <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
+                <option value="mistralai/Mixtral-8x7B-Instruct-v0.1">Mixtral 8x7B</option>
+                <option value="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo">Llama 3.1 70B</option>
+            </select>
+        </div>
+    </div>
+    <div class="row mb-5">
+        <div class="col-md-8 offset-md-2">
+            <div class="list-group" id="output"></div>
+        </div>
+    </div>
+    <div class="row mt-5 mb-2">
+        <div class="col-md-8 offset-md-2">
+            <div class="input-group">
+                <button class="btn btn-outline-warning" id="clear"><i class="bi bi-trash"></i></button>
+                <input type="text" class="form-control w-50" id="input" placeholder="hello! type ask in here!">
+                <button class="btn btn-outline-primary" id="submit"><i class="bi bi-send"></i></button>
+            </div>
+        </div>
+    </div>
+    <p class="text-center mb-1"><a class="btn btn-light" id="save"><i class="bi bi-save"></i> Save history</a></p>
+    <p class="text-center mb-5"><span class="badge bg-primary">Version 1</span><span class="badge bg-light"><a
+            href="https://duckduckgo.com/duckduckgo-help-pages/aichat" rel="nofollow">terms&privacy</a></span></p>
+</div>
+<script>
+    // https://github.com/mpetazzoni/sse.js/issues/69
+    (async () => {
+        const {SSE} = await import('/static/sse.js');
+        window.SSE = SSE;
+    })();
+
+    let input = document.getElementById("input");
+    let model = document.getElementById("model");
+    let submit = document.getElementById("submit");
+    let output = document.getElementById("output");
+    let clear = document.getElementById("clear");
+    let save = document.getElementById("save");
+    let session = [];
+    let xvqd4 = "";
+
+    fetch("/country");
+    fetch("/status").then((resp) => {
+        if (resp.ok) xvqd4 = resp.headers.get("X-Vqd-4");
+    });
+
+    submit.addEventListener("click", () => {
+        if (input.value.length <= 0) return;
+        if (xvqd4 === "") {
+            alert("unable to get X-Vqd-4, please refresh your browser.");
+            return;
+        }
+        session.push({"role": "user", "content": input.value});
+        output.insertAdjacentHTML("beforeend", `<div class="list-group-item"><p class="text-muted"><i class="bi bi-person me-1"></i>your</p><p>${input.value}</p></div>`);
+        input.value = "";
+        submit.disabled = true;
+
+        let source = new SSE("/completions", {
+            headers: {
+                "X-Vqd-4": xvqd4,
+            },
+            payload: JSON.stringify({
+                "model": model.value,
+                "messages": session,
+            }),
+            method: "POST",
+            start: false,
+        });
+        source.addEventListener("open", (event) => {
+            if ("x-vqd-4" in event.headers) xvqd4 = event.headers["x-vqd-4"][0];
+            session.push({
+                "role": "assistant",
+                "content": "",
+            })
+            output.insertAdjacentHTML("beforeend", `<div class="list-group-item"><p class="text-muted"><i class="bi bi-robot me-1"></i>assistant<small class="ms-1">${model.value}</small></p><div></div></div>`);
+        });
+        source.addEventListener("message", (event) => {
+            if (event.data === "[DONE]") {
+                submit.disabled = false;
+                return;
+            }
+            let payload = JSON.parse(event.data);
+            if ("message" in payload) {
+                session[session.length - 1]["content"] += payload["message"];
+                output.lastElementChild.lastElementChild.innerHTML = marked.parse(session[session.length - 1]["content"]);
+                window.scrollTo({
+                    top: document.body.scrollHeight,
+                    behavior: "smooth",
+                });
+            }
+        });
+        source.addEventListener("error", (event) => {
+            output.lastElementChild.lastElementChild.innerHTML = `<p class="text-warning">response error, please try refreshing your browser and try again.</p>`;
+        });
+        source.stream();
+    });
+
+    input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") submit.click();
+    });
+
+    model.addEventListener("change", () => {
+        if (session.length <= 0) return;
+        if (confirm("switching models will clear the history, are you sure?")) {
+            clear.click();
+        }
+    });
+
+    save.addEventListener("click", () => {
+        if (session.length <= 0) {
+            alert("history is empty.");
+            return;
+        }
+        let blob = new Blob([JSON.stringify(session, null, 2)], {type: "application/json"});
+        save.href = URL.createObjectURL(blob);
+        save.download = `history_${model.value}_${Date.now()}.json`;
+    });
+
+    clear.addEventListener("click", () => {
+        session = [];
+        output.innerHTML = "";
+        submit.disabled = false;
+        fetch("/status").then((resp) => {
+            if (resp.ok) xvqd4 = resp.headers.get("X-Vqd-4");
+        });
+    });
+</script>
+</body>
+</html>
